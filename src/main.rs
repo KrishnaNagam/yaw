@@ -6,7 +6,7 @@ use std::{
     io::{prelude::*}
 };
 
-use web_server::{ThreadPool,response,request};
+use web_server::{ThreadPool,response as response_module, request as request_module};
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
@@ -23,45 +23,47 @@ fn main() {
 
 fn handle_connection(mut stream: TcpStream) {
     
-    let request = request::Request::load(&mut stream);
+    let request = request_module::Request::load(&mut stream);
 
-    let mut response = response::Response::new();
-    let path = "root".to_string() + request.get_uri();
+    let mut response = response_module::Response::new();
+    let path = "root".to_string() + request.get_path();
     let auth_key = "Basic dXNlcjpwYXNz".to_string();
 
-    let (status_code, file_name) = match (request.get_method(),request.get_uri()) {
+    let (status_code, file_name) = 
+    
+        match (request.get_method(),request.get_path()) {
 
-        (request::Method::GET, "/") => (response::Code::STATUS200, "root/hello.html"),
-        (request::Method::GET, "/admin") => {
-            if request.get_header("Authorization") == Some(&auth_key) {
-                (response::Code::STATUS200, "root/admin.html")
-            } else {
-                (response::Code::STATUS401, "root/401.html")
-            }
-        },
+            (request_module::Method::GET, "/") => (response_module::Code::STATUS200, "root/hello.html"),
+            (request_module::Method::GET, "/admin") => {
+                if request.get_header("Authorization") == Some(&auth_key) {
+                    (response_module::Code::STATUS200, "root/admin.html")
+                } else {
+                    response.add_header("WWW-Authenticate: Basic realm=\"WallyWorld\"".to_string());
+                    (response_module::Code::STATUS401, "root/401.html")
+                }
+            },
 
-        (request::Method::GET, "/sleep") => {
-            thread::sleep(Duration::from_secs(5));
-            (response::Code::STATUS200, "hello.html")
-        },
+            (request_module::Method::GET, "/sleep") => { //TODO take from params
+                thread::sleep(Duration::from_secs(request.get_param("time").unwrap_or(&"5".to_string()).parse().unwrap()));
+                (response_module::Code::STATUS200, "root/hello.html")
+            },
 
-        (request::Method::GET, _) => {
-            if fs::metadata(path.as_str()).is_ok() {
-                (response::Code::STATUS200, path.as_str() )
-            } else {
-                (response::Code::STATUS404, "root/404.html")
-            }
-        },
+            (request_module::Method::GET, _) => {
+                if fs::metadata(path.as_str()).is_ok() {
+                    (response_module::Code::STATUS200, path.as_str() )
+                } else {
+                    (response_module::Code::STATUS404, "root/404.html")
+                }
+            },
 
-        (_, _) => (response::Code::STATUS501,"501.html")
-    };
+            (_, _) => (response_module::Code::STATUS501,"501.html")
+        };
 
     let contents = fs::read_to_string(file_name).unwrap();
 
     response.set_status(status_code);
     response.set_body(contents);
-    response.add_header("WWW-Authenticate: Basic realm=\"WallyWorld\"".to_string());
-
+    
     stream.write(response.string().as_bytes()).unwrap();
     
 
