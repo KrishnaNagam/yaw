@@ -107,43 +107,46 @@ pub mod request {
             (header_key.to_string(), header_value.to_string())
         }
 
-        pub fn process(self) -> (response::Code, response::Body){
+        pub fn process(self) -> response::Response {
             let mut response = response::Response::new();
-            let path = "root".to_string() + self.get_path();
+            let root_path = "root/";
             let auth_key = "Basic dXNlcjpwYXNz".to_string();
 
             let (status_code, file_name) = 
     
-            match (self.get_method(),self.get_path()) {
+            match (self.get_method(), self.get_path()) {
 
-                (Method::GET, "/") => (response::Code::STATUS200, "root/hello.html"),
+                (Method::GET, "/") => (response::Code::STATUS200, "hello.html"),
                 (Method::GET, "/admin") => {
                     if self.get_header("Authorization") == Some(&auth_key) {
-                        (response::Code::STATUS200, "root/admin.html")
+                        (response::Code::STATUS200, "admin.html")
                     } else {
                         response.add_header("WWW-Authenticate: Basic realm=\"WallyWorld\"".to_string());
-                        (response::Code::STATUS401, "root/401.html")
+                        (response::Code::STATUS401, "401.html")
                     }
                 },
 
                 (self::Method::GET, "/sleep") => { 
                     thread::sleep(Duration::from_secs(self.get_param("time").unwrap_or(&"5".to_string()).parse().unwrap()));
-                    (response::Code::STATUS200, "root/hello.html")
+                    (response::Code::STATUS200, "hello.html")
                 },
 
                 (self::Method::GET, _) => {
-                    if fs::metadata(path.as_str()).is_ok() {
-                        (response::Code::STATUS200, path.as_str() )
+                    if fs::metadata(root_path.to_string() + self.get_path()).is_ok() {
+                        (response::Code::STATUS200, self.get_path() )
                     } else {
-                        (response::Code::STATUS404, "root/404.html")
+                        (response::Code::STATUS404, "404.html")
                     }
                 },
 
                 (_, _) => (response::Code::STATUS501,"501.html")
             };
-            let contents = fs::read_to_string(file_name).unwrap();
 
-            (status_code, contents)
+            let contents = fs::read_to_string(root_path.to_string() + file_name).unwrap();
+            response.set_status(status_code);
+            response.set_body(contents); 
+
+            response
         }
         
     }

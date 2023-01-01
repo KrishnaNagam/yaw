@@ -22,11 +22,7 @@ fn handle_connection(mut stream: TcpStream) {
     
     let request = request_module::Request::load(&mut stream);
 
-    let mut response = response_module::Response::new();
-
-    let (status_code, body) = request.process();
-    response.set_status(status_code);
-    response.set_body(body);    
+    let response = request.process();   
     
     stream.write(response.string().as_bytes()).unwrap();
     
