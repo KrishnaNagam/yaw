@@ -7,10 +7,16 @@ type Job = Box<dyn FnOnce() + Send + 'static>;
 
 
 pub mod request {
-    use std::{net::TcpStream, io::{BufReader, prelude::*}, collections::HashMap};
+    use std::{fs, thread, time::Duration, net::TcpStream, io::{BufReader, prelude::*}, collections::HashMap};
+    use super::response;
+
     type URI = String;
     type HttpVerion = String;
     type Params = HashMap<String, String>;
+    type HeaderKey = String;
+    type HeaderValue = String;
+
+    const CRLF: &str = "\r\n";
 
     pub struct Request {
         method: Method,
@@ -38,10 +44,10 @@ pub mod request {
             loop {
                 let mut line = String::new();
                 buf_reader.read_line(&mut line).unwrap();
-                if line == "\r\n" {
+                if line == CRLF {
                     break;
                 }
-                let (header_key, header_value) = line.split_once(':').unwrap();
+                let (header_key, header_value) = Self::parse_header(line);
                 headers.insert(header_key.to_string(), header_value.trim().to_string());
                 //print!("{}",line)
             }
@@ -95,12 +101,57 @@ pub mod request {
 
             (method, path.to_string(), params, http_version)
         }
+
+        fn parse_header(header_line: String) -> (HeaderKey, HeaderValue) {
+            let (header_key, header_value) = header_line.split_once(':').unwrap();
+            (header_key.to_string(), header_value.to_string())
+        }
+
+        pub fn process(self) -> (response::Code, response::Body){
+            let mut response = response::Response::new();
+            let path = "root".to_string() + self.get_path();
+            let auth_key = "Basic dXNlcjpwYXNz".to_string();
+
+            let (status_code, file_name) = 
+    
+            match (self.get_method(),self.get_path()) {
+
+                (Method::GET, "/") => (response::Code::STATUS200, "root/hello.html"),
+                (Method::GET, "/admin") => {
+                    if self.get_header("Authorization") == Some(&auth_key) {
+                        (response::Code::STATUS200, "root/admin.html")
+                    } else {
+                        response.add_header("WWW-Authenticate: Basic realm=\"WallyWorld\"".to_string());
+                        (response::Code::STATUS401, "root/401.html")
+                    }
+                },
+
+                (self::Method::GET, "/sleep") => { 
+                    thread::sleep(Duration::from_secs(self.get_param("time").unwrap_or(&"5".to_string()).parse().unwrap()));
+                    (response::Code::STATUS200, "root/hello.html")
+                },
+
+                (self::Method::GET, _) => {
+                    if fs::metadata(path.as_str()).is_ok() {
+                        (response::Code::STATUS200, path.as_str() )
+                    } else {
+                        (response::Code::STATUS404, "root/404.html")
+                    }
+                },
+
+                (_, _) => (response::Code::STATUS501,"501.html")
+            };
+            let contents = fs::read_to_string(file_name).unwrap();
+
+            (status_code, contents)
+        }
         
     }
     
 }
 
 pub mod response {
+    pub type Body = String;
     pub enum Code {
         STATUS200,
         STATUS404,
