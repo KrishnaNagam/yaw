@@ -111,6 +111,8 @@ pub mod request {
             let mut response = response::Response::new();
             let root_path = "root/";
             let auth_key = "Basic dXNlcjpwYXNz".to_string();
+            let status = response.get_status();
+            print!("status:{:?}\n", status);
 
             let (status_code, file_name) = 
     
@@ -155,16 +157,19 @@ pub mod request {
 
 pub mod response {
     pub type Body = String;
+    #[derive(Debug)]
     pub enum Code {
         STATUS200,
         STATUS404,
         STATUS401,
-        STATUS501
+        STATUS500,
+        STATUS501,
+        UNKNOWN,
     }
     
     
     pub struct Response {
-        status: String, //TODO change to enum
+        status: Code, //TODO change to enum
         headers: String,
         body: String,
     }
@@ -172,18 +177,13 @@ pub mod response {
     impl Response {
         pub fn new() -> Response{
             Response {
-                status: "200 Ok".to_string(),
+                status: Code::UNKNOWN,
                 headers: "Server: rust server\r\n".to_string(),
                 body: "".to_string()
             }
         }
         pub fn set_status(&mut self,status: Code){
-            self.status = match status {
-                Code::STATUS200 => "200 Ok".to_string(),
-                Code::STATUS404 => "404 Not Found".to_string(),
-                Code::STATUS501 => "501 Not Implemented".to_string(),
-                Code::STATUS401 => "401 Unauthorized".to_string()
-            };
+            self.status = status;
         }
     
         pub fn add_header(&mut self,header: String){
@@ -196,7 +196,22 @@ pub mod response {
             self.body = content;
         }
         pub fn string(&self) -> String {
-            format!("HTTP/1.1 {}\r\n{}\r\n{}",self.status,self.headers,self.body)
+            format!(
+                "HTTP/1.1 {}\r\n{}\r\n{}",
+                match self.status {
+                        Code::STATUS200 => "200 Ok".to_string(),
+                        Code::STATUS404 => "404 Not Found".to_string(),
+                        Code::STATUS501 => "501 Not Implemented".to_string(),
+                        Code::STATUS401 => "401 Unauthorized".to_string(),
+                        Code::STATUS500 => "500 Internal Server Error".to_string(),
+                        Code::UNKNOWN => "500 Internal Server Error".to_string()
+                    },
+                self.headers,
+                self.body
+            )
+        }
+        pub fn get_status(&self) -> &Code{
+            &self.status
         }
     }
     
