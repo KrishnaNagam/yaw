@@ -3,7 +3,11 @@ use std::{
     io::{prelude::*}
 };
 
-use web_server::{ThreadPool,response as response_module, request as request_module};
+mod http;
+mod config;
+
+use web_server::{ThreadPool};
+use crate::http::request as request_module;
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
@@ -24,7 +28,7 @@ fn handle_connection(mut stream: TcpStream) {
 
     let response = request.process();   
     
-    stream.write(response.string().as_bytes()).unwrap();
+    stream.write(response.to_string().as_bytes()).unwrap();
     
 
 }
