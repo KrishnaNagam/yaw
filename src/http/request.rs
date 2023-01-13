@@ -1,6 +1,8 @@
 use std::{fs, thread, time::Duration, net::TcpStream, io::{BufReader, prelude::*}, collections::HashMap};
 use crate::http::*;
 use super::response;
+use std::sync::Arc;
+use base64::{engine::general_purpose, Engine};
 
 type URI = String;
 type HttpVerion = String;
@@ -168,27 +170,43 @@ impl Request {
     pub fn get_param(&self, param: &str) -> Option<&String> {
         self.request_line.get_param(param)
     }
+    
+}
 
-    pub fn process(self) -> response::Response {
+pub struct RequestProcessor{
+    config: Arc<Config>
+}
+
+impl RequestProcessor {
+    pub fn new(config: Arc<Config>) ->  Self {
+        Self { 
+            config: config
+        }
+    }
+
+    pub fn process(self, request: Request) -> response::Response {
         let mut response = response::Response::new();
         let status = response.get_status_code();
         print!("status:{:?}\n", status);
         
-        self.handle_authentication(&mut response);
-        self.handle_custom_routes(&mut response);
-        self.handle_everything_else(&mut response);
+        self.handle_authentication(&request, &mut response);
+        self.handle_custom_routes(&request, &mut response);
+        self.handle_everything_else(&request, &mut response);
 
         response
     }
 
-    fn handle_authentication(&self, response: &mut response::Response) {
-        let auth_key = "Basic dXNlcjpwYXNz".to_string();
-        let root_path = "root/";
+    fn handle_authentication(&self, request: &Request, response: &mut response::Response) {
+        let username = &self.config.username;
+        let password = &self.config.password;
+        let encoded_creds: String = general_purpose::STANDARD.encode(username.to_string() + ":" + password);
+        let auth_key = "Basic ".to_string() + encoded_creds.as_str();
+        let root_path = &self.config.root_path;
 
         if response.get_status_code() == &response::StatusCode::UNKNOWN {
-            match (self.get_method(), self.get_path()) {
+            match (request.get_method(), request.get_path()) {
                 (Method::GET, "/admin") => {
-                    if self.get_header("Authorization") == Some(&auth_key) {
+                    if request.get_header("Authorization") == Some(&auth_key) {
                         let file_name = "admin.html";
                         response.set_status_code(response::StatusCode::STATUS200);
                         let contents = fs::read_to_string(root_path.to_string() + file_name).unwrap();
@@ -207,16 +225,16 @@ impl Request {
 
     }
 
-    fn handle_custom_routes(&self, response: &mut response::Response) {
-        let root_path = "root/";
+    fn handle_custom_routes(&self, request: &Request, response: &mut response::Response) {
+        let root_path = &self.config.root_path;
 
         if response.get_status_code() == &response::StatusCode::UNKNOWN {
-            match (self.get_method(), self.get_path()) {
+            match (request.get_method(), request.get_path()) {
 
                 (self::Method::GET, "/sleep") => { 
                     let file_name = "hello.html";
                     thread::sleep(Duration::from_secs(
-                        self.get_param("time").unwrap_or(&"5".to_string()).parse().unwrap_or(0)
+                        request.get_param("time").unwrap_or(&"5".to_string()).parse().unwrap_or(0)
                         //5
                     ));
                     let contents = fs::read_to_string(root_path.to_string() + file_name).unwrap();
@@ -229,19 +247,24 @@ impl Request {
         }
     }
 
-    fn handle_everything_else(&self, response: &mut response::Response) {
-        let root_path = "root/";
+    fn handle_everything_else(&self, request: &Request, response: &mut response::Response) {
+        let root_path = &self.config.root_path;
 
         if response.get_status_code() == &response::StatusCode::UNKNOWN {
             let (status_code, file_name) = 
 
-            match (self.get_method(), self.get_path()) {
+            match (request.get_method(), request.get_path()) {
 
-                (Method::GET, "/") => (response::StatusCode::STATUS200, "hello.html"),
-
+                (Method::GET, "/") => {
+                    if fs::metadata(root_path.to_string() + self.config.index.as_str()).is_ok() {
+                        (response::StatusCode::STATUS200, self.config.index.as_str())
+                    } else {
+                        (response::StatusCode::STATUS404, "404.html")
+                    }
+                },
                 (self::Method::GET, _) => {
-                    if fs::metadata(root_path.to_string() + self.get_path()).is_ok() {
-                        (response::StatusCode::STATUS200, self.get_path() )
+                    if fs::metadata(root_path.to_string() + request.get_path()).is_ok() {
+                        (response::StatusCode::STATUS200, request.get_path() )
                     } else {
                         (response::StatusCode::STATUS404, "404.html")
                     }
@@ -257,5 +280,4 @@ impl Request {
         }
     }
 
-    
 }
