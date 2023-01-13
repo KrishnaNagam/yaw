@@ -82,7 +82,7 @@ impl RequestLine {
     pub fn parse(request_line: String) -> RequestLine{
         let mut request_line_items 
                 = request_line.split_ascii_whitespace().map(|s| s.to_string());
-        let method = Self::parse_method(request_line_items.next().unwrap().as_str());
+        let method = Method::parse(request_line_items.next().unwrap().as_str());
         let request_target = request_line_items.next().unwrap();
         let request_target = RequestTarget::parse(request_target);
         let http_version = request_line_items.next().unwrap();
@@ -105,17 +105,6 @@ impl RequestLine {
     pub fn get_param(&self, param: &str) -> Option<&String> {
         self.request_target.get_param(param)
     }
-
-    fn parse_method(method_string: &str) -> Method{
-        match method_string {
-            "GET" => Method::GET,
-            "POST" => Method::POST,
-            "PUT" => Method::PUT,
-            "DELETE" => Method::DELETE,
-            "HEAD" => Method::HEAD,
-            _ => panic!("Unkown Request Method")
-        }
-    }
     
 }
 
@@ -125,6 +114,19 @@ pub enum Method {
     PUT,
     DELETE,
     HEAD
+}
+
+impl Method {
+    pub fn parse(method_string: &str) -> Method {
+        match method_string {
+            "GET" => Method::GET,
+            "POST" => Method::POST,
+            "PUT" => Method::PUT,
+            "DELETE" => Method::DELETE,
+            "HEAD" => Method::HEAD,
+            _ => panic!("Unkown Request Method")
+        }
+    }
 }
 
 impl Request {
