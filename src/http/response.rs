@@ -1,6 +1,8 @@
 use std::fmt;
 use crate::http::*;
 
+use super::headers::Headers;
+
 pub type Body = String;
 type HttpVerion = String;
 
