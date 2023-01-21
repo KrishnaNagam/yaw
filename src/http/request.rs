@@ -1,4 +1,8 @@
-use super::{headers::Headers, Body, CRLF, HttpVerion};
+use super::{
+    errors::{ClientError, HttpError, ServerError},
+    headers::Headers,
+    Body, HttpVerion, ParseError, CRLF,
+};
 
 use std::{
     collections::HashMap,
@@ -6,13 +10,13 @@ use std::{
     net::TcpStream,
 };
 
-type URI = String;
+type _URI = String;
 type Params = HashMap<String, String>;
 
 pub struct Request {
     request_line: RequestLine,
     headers: Headers,
-    body: Body,
+    _body: Body,
 }
 
 pub struct RequestLine {
@@ -39,18 +43,32 @@ pub struct Query {
 }
 
 impl RequestLine {
-    pub fn parse(request_line: String) -> RequestLine {
+    pub fn parse(request_line: String) -> Result<RequestLine, ParseError> {
         let mut request_line_items = request_line.split_ascii_whitespace().map(|s| s.to_string());
-        let method = Method::parse(request_line_items.next().unwrap().as_str());
-        let request_target = request_line_items.next().unwrap();
-        let request_target = RequestTarget::parse(request_target);
-        let http_version = request_line_items.next().unwrap();
+        let method = match request_line_items.next() {
+            Some(method_string) => match Method::parse(&method_string) {
+                Ok(method) => method,
+                Err(e) => return Err(e),
+            },
+            None => return Err(ParseError),
+        };
+        let request_target = match request_line_items.next() {
+            Some(request_target_string) => match RequestTarget::parse(request_target_string) {
+                Ok(request_target) => request_target,
+                Err(e) => return Err(e),
+            },
+            None => return Err(ParseError),
+        };
+        let http_version = match request_line_items.next() {
+            Some(http_version_string) => http_version_string,
+            None => return Err(ParseError),
+        };
 
-        RequestLine {
+        Ok(RequestLine {
             method: method,
             request_target: request_target,
             http_version: http_version,
-        }
+        })
     }
 
     pub fn get_method(&self) -> &Method {
@@ -67,25 +85,19 @@ impl RequestLine {
 }
 
 impl RequestTarget {
-    pub fn parse(request_target: String) -> RequestTarget {
-        let request_target_items = request_target.split_once('?');
-        let (absolute_path, query_string) = if request_target_items.is_none() {
-            (request_target, None)
-        } else {
-            (
-                request_target_items.unwrap().0.to_string(),
-                Some(request_target_items.unwrap().1),
-            )
+    pub fn parse(request_target: String) -> Result<RequestTarget, ParseError> {
+        let (absolute_path, query_string) = match request_target.split_once('?') {
+            Some((absolute_path, query_string)) => (absolute_path.to_string(), Some(query_string)),
+            None => (request_target, None),
         };
-        let query = if query_string.is_none() {
-            None
-        } else {
-            Some(Query::parse(query_string.unwrap().to_string()))
+        let query = match query_string {
+            Some(query_string) => Some(Query::parse(query_string.to_string())),
+            None => None,
         };
-        RequestTarget {
-            absolute_path: absolute_path.to_string(),
+        Ok(RequestTarget {
+            absolute_path: absolute_path,
             query: query,
-        }
+        })
     }
 
     pub fn get_path(&self) -> &str {
@@ -98,14 +110,14 @@ impl RequestTarget {
 }
 
 impl Method {
-    pub fn parse(method_string: &str) -> Method {
+    pub fn parse(method_string: &str) -> Result<Method, ParseError> {
         match method_string {
-            "GET" => Method::GET,
-            "POST" => Method::POST,
-            "PUT" => Method::PUT,
-            "DELETE" => Method::DELETE,
-            "HEAD" => Method::HEAD,
-            _ => panic!("Unkown Request Method"),
+            "GET" => Ok(Method::GET),
+            "POST" => Ok(Method::POST),
+            "PUT" => Ok(Method::PUT),
+            "DELETE" => Ok(Method::DELETE),
+            "HEAD" => Ok(Method::HEAD),
+            _ => Err(ParseError),
         }
     }
 }
@@ -129,27 +141,36 @@ impl Query {
 }
 
 impl Request {
-    pub fn load(request_stream: &mut TcpStream) -> Request {
+    pub fn load(request_stream: &mut TcpStream) -> Result<Request, HttpError> {
         let mut buf_reader = BufReader::new(request_stream);
         let mut request_line = String::new();
-        buf_reader.read_line(&mut request_line).unwrap();
-        let request_line = RequestLine::parse(request_line);
+        match buf_reader.read_line(&mut request_line) {
+            Ok(_) => (),
+            Err(e) => return Err(HttpError::ServerError(ServerError::InternalServerError)),
+        }
+        let request_line = match RequestLine::parse(request_line) {
+            Ok(request_line) => request_line,
+            Err(e) => return Err(HttpError::ClientError(ClientError::BadRequest)),
+        };
 
         let mut headers = Headers::new();
         loop {
             let mut line = String::new();
-            buf_reader.read_line(&mut line).unwrap();
+            match buf_reader.read_line(&mut line) {
+                Ok(_) => (),
+                Err(e) => return Err(HttpError::ServerError(ServerError::InternalServerError)),
+            };
             if line == CRLF {
                 break;
             }
             headers.parse_and_add_header_from(line);
         }
 
-        Request {
+        Ok(Request {
             request_line: request_line,
             headers: headers,
-            body: "".to_string(),
-        }
+            _body: "".to_string(),
+        })
     }
 
     pub fn get_path(&self) -> &str {

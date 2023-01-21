@@ -8,9 +8,13 @@ use super::headers::Headers;
 pub enum StatusCode {
     STATUS200,
     STATUS404,
+    STATUS400,
     STATUS401,
+    STATUS405,
     STATUS500,
     STATUS501,
+    STATUS502,
+    STATUS503,
     UNKNOWN,
 }
 
@@ -35,8 +39,12 @@ impl StatusLine {
             StatusCode::STATUS200 => "Ok".to_string(),
             StatusCode::STATUS404 => "Not Found".to_string(),
             StatusCode::STATUS501 => "Not Implemented".to_string(),
+            StatusCode::STATUS400 => "Invalid Request".to_string(),
             StatusCode::STATUS401 => "Unauthorized".to_string(),
+            StatusCode::STATUS405 => "Method Not Allowed".to_string(),
             StatusCode::STATUS500 => "Internal Server Error".to_string(),
+            StatusCode::STATUS502 => "Bad Gateway".to_string(),
+            StatusCode::STATUS503 => "Service Unavailable".to_string(),
             StatusCode::UNKNOWN => "Internal Server Error".to_string()
         };
     }
@@ -56,8 +64,12 @@ impl fmt::Display for StatusLine {
                 StatusCode::STATUS200 => "200",
                 StatusCode::STATUS404 => "404",
                 StatusCode::STATUS501 => "501",
+                StatusCode::STATUS400 => "400",
                 StatusCode::STATUS401 => "401",
+                StatusCode::STATUS405 => "405",
                 StatusCode::STATUS500 => "500",
+                StatusCode::STATUS502 => "502",
+                StatusCode::STATUS503 => "503",
                 StatusCode::UNKNOWN => "500",
             }.to_string(), 
             self.reason_phrase

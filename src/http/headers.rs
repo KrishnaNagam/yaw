@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt};
 
-use super::CRLF;
+use super::{CRLF, ParseError};
 
 type HeaderKey = String;
 type HeaderValue = String;
@@ -16,9 +16,14 @@ impl Headers {
             headers: HashMap::new()
          }
     }
-    pub fn parse_and_add_header_from(&mut self, header_field: String) {
-        let (header_key, header_value) = header_field.split_once(':').unwrap();
-        self.add_header(header_key.to_string(), header_value.to_string());
+    pub fn parse_and_add_header_from(&mut self, header_field: String) -> Result<(), ParseError> {
+        match header_field.split_once(':') {
+            Some((header_key, header_value)) => {
+                self.add_header(header_key.to_string(), header_value.to_string());
+                Ok(())
+            }
+            None => Err(ParseError)
+        }
     }
 
     pub fn get_header(&self, header: &str) -> Option<&String> {
