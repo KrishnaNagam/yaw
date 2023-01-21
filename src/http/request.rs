@@ -1,8 +1,7 @@
 use std::{fs, thread, time::Duration, net::TcpStream, io::{BufReader, prelude::*}, collections::HashMap};
 use crate::http::*;
-use super::response;
+use super::{response, server::Config, auth::basic_auth_validate, headers::Headers};
 use std::sync::Arc;
-use base64::{engine::general_purpose, Engine};
 
 type URI = String;
 type HttpVerion = String;
@@ -14,31 +13,57 @@ pub struct Request {
     body: Body,
 }
 
+pub struct RequestLine {
+    pub method: Method,
+    pub request_target: RequestTarget,
+    pub http_version: HttpVerion,
+}
+
+pub enum Method {
+    GET,
+    POST,
+    PUT,
+    DELETE,
+    HEAD
+}
+
+pub struct RequestTarget {
+    absolute_path: String,
+    query: Option<Query>,
+}
+
 pub struct Query {
     params: Params
 }
 
-impl Query {
-    pub fn parse(query: String) -> Query {
-        let params_strings_list = query.split('&');
-        let mut params: HashMap<String,String> = HashMap::new();
-        for param_string in params_strings_list {
-            let (param_key, param_value) 
-                    = param_string.split_once('=').unwrap_or_else( || (param_string, ""));
-            params.insert(param_key.to_string(), param_value.to_string());
-        }
-        Query {
-            params: params
+impl RequestLine {
+    pub fn parse(request_line: String) -> RequestLine{
+        let mut request_line_items 
+                = request_line.split_ascii_whitespace().map(|s| s.to_string());
+        let method = Method::parse(request_line_items.next().unwrap().as_str());
+        let request_target = request_line_items.next().unwrap();
+        let request_target = RequestTarget::parse(request_target);
+        let http_version = request_line_items.next().unwrap();
+
+        RequestLine {
+            method: method,
+            request_target: request_target,
+            http_version: http_version,
         }
     }
 
-    pub fn get_param(&self, param: &str) -> Option<&String> {
-        self.params.get(param)
+    pub fn get_method(&self) -> &Method{
+        &self.method
     }
-}
-pub struct RequestTarget {
-    absolute_path: String,
-    query: Option<Query>,
+
+    pub fn get_path(&self) -> &str{
+        &self.request_target.get_path()
+    }
+
+    pub fn get_param(&self, param: &str) -> Option<&String> {
+        self.request_target.get_param(param)
+    }
+    
 }
 
 impl RequestTarget {
@@ -72,50 +97,6 @@ impl RequestTarget {
     }
 }
 
-pub struct RequestLine {
-    pub method: Method,
-    pub request_target: RequestTarget,
-    pub http_version: HttpVerion,
-}
-
-impl RequestLine {
-    pub fn parse(request_line: String) -> RequestLine{
-        let mut request_line_items 
-                = request_line.split_ascii_whitespace().map(|s| s.to_string());
-        let method = Method::parse(request_line_items.next().unwrap().as_str());
-        let request_target = request_line_items.next().unwrap();
-        let request_target = RequestTarget::parse(request_target);
-        let http_version = request_line_items.next().unwrap();
-
-        RequestLine {
-            method: method,
-            request_target: request_target,
-            http_version: http_version,
-        }
-    }
-
-    pub fn get_method(&self) -> &Method{
-        &self.method
-    }
-
-    pub fn get_path(&self) -> &str{
-        &self.request_target.get_path()
-    }
-
-    pub fn get_param(&self, param: &str) -> Option<&String> {
-        self.request_target.get_param(param)
-    }
-    
-}
-
-pub enum Method {
-    GET,
-    POST,
-    PUT,
-    DELETE,
-    HEAD
-}
-
 impl Method {
     pub fn parse(method_string: &str) -> Method {
         match method_string {
@@ -129,13 +110,31 @@ impl Method {
     }
 }
 
+impl Query {
+    pub fn parse(query: String) -> Query {
+        let params_strings_list = query.split('&');
+        let mut params: HashMap<String,String> = HashMap::new();
+        for param_string in params_strings_list {
+            let (param_key, param_value) 
+                    = param_string.split_once('=').unwrap_or_else( || (param_string, ""));
+            params.insert(param_key.to_string(), param_value.to_string());
+        }
+        Query {
+            params: params
+        }
+    }
+
+    pub fn get_param(&self, param: &str) -> Option<&String> {
+        self.params.get(param)
+    }
+}
+
 impl Request {
     pub fn load(request_stream: &mut TcpStream) -> Request{
         let mut buf_reader = BufReader::new(request_stream);
         let mut request_line = String::new();
         buf_reader.read_line(&mut request_line).unwrap();
         let request_line = RequestLine::parse(request_line);
-        //let (method, path, params, http_version) = Self::parse_request_line(request_line);
         
         let mut headers = Headers::new();
         loop {
@@ -144,11 +143,9 @@ impl Request {
             if line == CRLF {
                 break;
             }
-            headers.parse_header_field(line);
-            //print!("{}",line)
+            headers.parse_and_add_header_from(line);
         }
         
-        //print!("{}\n",headers.get("Authorization").unwrap_or(&"Auth header not found".to_string()));
 
         Request {
             request_line: request_line,
@@ -188,8 +185,6 @@ impl RequestProcessor {
 
     pub fn process(self, request: Request) -> response::Response {
         let mut response = response::Response::new();
-        let status = response.get_status_code();
-        print!("status:{:?}\n", status);
         
         self.handle_authentication(&request, &mut response);
         self.handle_custom_routes(&request, &mut response);
@@ -199,16 +194,12 @@ impl RequestProcessor {
     }
 
     fn handle_authentication(&self, request: &Request, response: &mut response::Response) {
-        let username = &self.config.username;
-        let password = &self.config.password;
-        let encoded_creds: String = general_purpose::STANDARD.encode(username.to_string() + ":" + password);
-        let auth_key = "Basic ".to_string() + encoded_creds.as_str();
         let root_path = &self.config.root_path;
 
         if response.get_status_code() == &response::StatusCode::UNKNOWN {
             match (request.get_method(), request.get_path()) {
                 (Method::GET, "/admin") => {
-                    if request.get_header("Authorization") == Some(&auth_key) {
+                    if basic_auth_validate(request,&self.config.username,&self.config.password) {
                         let file_name = "admin.html";
                         response.set_status_code(response::StatusCode::STATUS200);
                         let contents = fs::read_to_string(root_path.to_string() + file_name).unwrap();
