@@ -1,3 +1,9 @@
+pub mod server;
+pub mod config;
+
+mod request_processor;
+mod http;
+
 use std::{
     thread,
     sync::{Arc, Mutex, mpsc},

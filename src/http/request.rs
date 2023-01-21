@@ -1,10 +1,12 @@
-use std::{fs, thread, time::Duration, net::TcpStream, io::{BufReader, prelude::*}, collections::HashMap};
-use crate::http::*;
-use super::{response, server::Config, auth::basic_auth_validate, headers::Headers};
-use std::sync::Arc;
+use super::{headers::Headers, Body, CRLF, HttpVerion};
+
+use std::{
+    collections::HashMap,
+    io::{prelude::*, BufReader},
+    net::TcpStream,
+};
 
 type URI = String;
-type HttpVerion = String;
 type Params = HashMap<String, String>;
 
 pub struct Request {
@@ -24,7 +26,7 @@ pub enum Method {
     POST,
     PUT,
     DELETE,
-    HEAD
+    HEAD,
 }
 
 pub struct RequestTarget {
@@ -33,13 +35,12 @@ pub struct RequestTarget {
 }
 
 pub struct Query {
-    params: Params
+    params: Params,
 }
 
 impl RequestLine {
-    pub fn parse(request_line: String) -> RequestLine{
-        let mut request_line_items 
-                = request_line.split_ascii_whitespace().map(|s| s.to_string());
+    pub fn parse(request_line: String) -> RequestLine {
+        let mut request_line_items = request_line.split_ascii_whitespace().map(|s| s.to_string());
         let method = Method::parse(request_line_items.next().unwrap().as_str());
         let request_target = request_line_items.next().unwrap();
         let request_target = RequestTarget::parse(request_target);
@@ -52,18 +53,17 @@ impl RequestLine {
         }
     }
 
-    pub fn get_method(&self) -> &Method{
+    pub fn get_method(&self) -> &Method {
         &self.method
     }
 
-    pub fn get_path(&self) -> &str{
+    pub fn get_path(&self) -> &str {
         &self.request_target.get_path()
     }
 
     pub fn get_param(&self, param: &str) -> Option<&String> {
         self.request_target.get_param(param)
     }
-    
 }
 
 impl RequestTarget {
@@ -72,28 +72,28 @@ impl RequestTarget {
         let (absolute_path, query_string) = if request_target_items.is_none() {
             (request_target, None)
         } else {
-            (request_target_items.unwrap().0.to_string(), Some(request_target_items.unwrap().1))
+            (
+                request_target_items.unwrap().0.to_string(),
+                Some(request_target_items.unwrap().1),
+            )
         };
         let query = if query_string.is_none() {
             None
         } else {
             Some(Query::parse(query_string.unwrap().to_string()))
         };
-        RequestTarget { 
+        RequestTarget {
             absolute_path: absolute_path.to_string(),
             query: query,
         }
     }
 
-    pub fn get_path(&self) -> &str{
+    pub fn get_path(&self) -> &str {
         &self.absolute_path
     }
 
     pub fn get_param(&self, param: &str) -> Option<&String> {
-        self.query.as_ref()
-            .and_then(|query| 
-                query.get_param(param)
-            )
+        self.query.as_ref().and_then(|query| query.get_param(param))
     }
 }
 
@@ -105,7 +105,7 @@ impl Method {
             "PUT" => Method::PUT,
             "DELETE" => Method::DELETE,
             "HEAD" => Method::HEAD,
-            _ => panic!("Unkown Request Method")
+            _ => panic!("Unkown Request Method"),
         }
     }
 }
@@ -113,15 +113,14 @@ impl Method {
 impl Query {
     pub fn parse(query: String) -> Query {
         let params_strings_list = query.split('&');
-        let mut params: HashMap<String,String> = HashMap::new();
+        let mut params: HashMap<String, String> = HashMap::new();
         for param_string in params_strings_list {
-            let (param_key, param_value) 
-                    = param_string.split_once('=').unwrap_or_else( || (param_string, ""));
+            let (param_key, param_value) = param_string
+                .split_once('=')
+                .unwrap_or_else(|| (param_string, ""));
             params.insert(param_key.to_string(), param_value.to_string());
         }
-        Query {
-            params: params
-        }
+        Query { params: params }
     }
 
     pub fn get_param(&self, param: &str) -> Option<&String> {
@@ -130,12 +129,12 @@ impl Query {
 }
 
 impl Request {
-    pub fn load(request_stream: &mut TcpStream) -> Request{
+    pub fn load(request_stream: &mut TcpStream) -> Request {
         let mut buf_reader = BufReader::new(request_stream);
         let mut request_line = String::new();
         buf_reader.read_line(&mut request_line).unwrap();
         let request_line = RequestLine::parse(request_line);
-        
+
         let mut headers = Headers::new();
         loop {
             let mut line = String::new();
@@ -145,7 +144,6 @@ impl Request {
             }
             headers.parse_and_add_header_from(line);
         }
-        
 
         Request {
             request_line: request_line,
@@ -154,123 +152,19 @@ impl Request {
         }
     }
 
-    pub fn get_path(&self) -> &str{
+    pub fn get_path(&self) -> &str {
         &self.request_line.get_path()
     }
 
-    pub fn get_method(&self) -> &Method{
+    pub fn get_method(&self) -> &Method {
         &self.request_line.get_method()
     }
 
-    pub fn get_header(&self, header: &str) -> Option<&String>{
+    pub fn get_header(&self, header: &str) -> Option<&String> {
         self.headers.get_header(header)
     }
 
     pub fn get_param(&self, param: &str) -> Option<&String> {
         self.request_line.get_param(param)
     }
-    
-}
-
-pub struct RequestProcessor{
-    config: Arc<Config>
-}
-
-impl RequestProcessor {
-    pub fn new(config: Arc<Config>) ->  Self {
-        Self { 
-            config: config
-        }
-    }
-
-    pub fn process(self, request: Request) -> response::Response {
-        let mut response = response::Response::new();
-        
-        self.handle_authentication(&request, &mut response);
-        self.handle_custom_routes(&request, &mut response);
-        self.handle_everything_else(&request, &mut response);
-
-        response
-    }
-
-    fn handle_authentication(&self, request: &Request, response: &mut response::Response) {
-        let root_path = &self.config.root_path;
-
-        if response.get_status_code() == &response::StatusCode::UNKNOWN {
-            match (request.get_method(), request.get_path()) {
-                (Method::GET, "/admin") => {
-                    if basic_auth_validate(request,&self.config.username,&self.config.password) {
-                        let file_name = "admin.html";
-                        response.set_status_code(response::StatusCode::STATUS200);
-                        let contents = fs::read_to_string(root_path.to_string() + file_name).unwrap();
-                        response.set_body(contents);
-                    } else {
-                        let file_name = "401.html";
-                        response.add_header("WWW-Authenticate".to_string(), "Basic realm=\"WallyWorld\"".to_string());
-                        response.set_status_code(response::StatusCode::STATUS401);
-                        let contents = fs::read_to_string(root_path.to_string() + file_name).unwrap();
-                        response.set_body(contents);
-                    }
-                },
-                (_, _) => ()
-            }
-        } 
-
-    }
-
-    fn handle_custom_routes(&self, request: &Request, response: &mut response::Response) {
-        let root_path = &self.config.root_path;
-
-        if response.get_status_code() == &response::StatusCode::UNKNOWN {
-            match (request.get_method(), request.get_path()) {
-
-                (self::Method::GET, "/sleep") => { 
-                    let file_name = "hello.html";
-                    thread::sleep(Duration::from_secs(
-                        request.get_param("time").unwrap_or(&"5".to_string()).parse().unwrap_or(0)
-                        //5
-                    ));
-                    let contents = fs::read_to_string(root_path.to_string() + file_name).unwrap();
-                    response.set_status_code(response::StatusCode::STATUS200);
-                    response.set_body(contents); 
-                }
-                (_, _) => ()
-            };
-
-        }
-    }
-
-    fn handle_everything_else(&self, request: &Request, response: &mut response::Response) {
-        let root_path = &self.config.root_path;
-
-        if response.get_status_code() == &response::StatusCode::UNKNOWN {
-            let (status_code, file_name) = 
-
-            match (request.get_method(), request.get_path()) {
-
-                (Method::GET, "/") => {
-                    if fs::metadata(root_path.to_string() + self.config.index.as_str()).is_ok() {
-                        (response::StatusCode::STATUS200, self.config.index.as_str())
-                    } else {
-                        (response::StatusCode::STATUS404, "404.html")
-                    }
-                },
-                (self::Method::GET, _) => {
-                    if fs::metadata(root_path.to_string() + request.get_path()).is_ok() {
-                        (response::StatusCode::STATUS200, request.get_path() )
-                    } else {
-                        (response::StatusCode::STATUS404, "404.html")
-                    }
-                },
-
-                (_, _) => (response::StatusCode::STATUS501,"501.html")
-            };
-
-            let contents = fs::read_to_string(root_path.to_string() + file_name).unwrap();
-            response.set_status_code(status_code);
-            response.set_body(contents); 
-
-        }
-    }
-
 }

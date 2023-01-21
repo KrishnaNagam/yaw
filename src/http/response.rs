@@ -3,8 +3,6 @@ use crate::http::*;
 
 use super::headers::Headers;
 
-pub type Body = String;
-type HttpVerion = String;
 
 #[derive(Debug, PartialEq)]
 pub enum StatusCode {

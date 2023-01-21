@@ -1,12 +1,10 @@
-pub mod server;
-mod request;
-mod response;
-mod auth;
+pub mod request;
+pub mod response;
+pub mod auth;
 mod headers;
 
-use std::{collections::HashMap,fmt};
-
-type Body = String;
+pub type HttpVerion = String;
+pub type Body = String;
 
 const CRLF: &str = "\r\n";
 

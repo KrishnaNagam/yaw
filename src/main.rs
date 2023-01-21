@@ -1,11 +1,9 @@
-use http::server::Server;
+use yaw::{server::Server, config::Config};
 
-mod http;
-mod config;
 
 fn main() {
     let mut server = Server::new();
-    let mut config = http::server::Config::new();
+    let mut config = Config::new();
     config.set_index("hello.html");
 
     server.set_config(config);

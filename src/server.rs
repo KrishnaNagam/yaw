@@ -1,33 +1,11 @@
 use std::{net::{TcpListener, TcpStream}, sync::Arc, io::Write};
 
-use web_server::ThreadPool;
-
-use super::request;
+use crate::{http::request, request_processor::RequestProcessor, ThreadPool, config::Config};
 
 
-pub struct Config {
-    pub port: u32,
-    pub root_path: String,
-    pub index: String,
-    pub username: String,
-    pub password: String
-}
 
-impl Config {
-    pub fn new() -> Config {
-        Config {
-            port: 8080,
-            root_path: "root/".to_string(),
-            index: "index.html".to_string(),
-            username: "user".to_string(),
-            password: "password".to_string()
-        }
-    }
 
-    pub fn set_index(&mut self, index: &str) {
-        self.index = index.to_string();
-    }
-}
+
 pub struct Server {
     config: Config,
     thread_pool: ThreadPool
@@ -63,7 +41,7 @@ impl Server {
     
         let request = request::Request::load(&mut stream);
 
-        let request_processor= request::RequestProcessor::new(config);
+        let request_processor= RequestProcessor::new(config);
     
         let response = request_processor.process(request);   
         
