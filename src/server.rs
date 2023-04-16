@@ -1,65 +1,69 @@
-use std::{
-    io::Write,
-    net::{TcpListener, TcpStream},
-    sync::Arc,
-};
+use std::{sync::Arc, thread, time::Duration};
+
+use tokio::net::{TcpListener, TcpStream};
 
 use crate::{
     config::Config,
     http::{
-        errors::HttpError,
-        request,
+        request::{self, Request, Method},
+        response::{Response, Status},
     },
-    request_processor::RequestProcessor,
-    ThreadPool,
+    request_processor::{RequestProcessor},
 };
 
 pub struct Server {
-    config: Config,
-    thread_pool: ThreadPool,
+    config: Arc<Config>,
+    request_processor: Arc<RequestProcessor>,
 }
 
 impl Server {
-    pub fn new() -> Server {
-        let config = Config::new();
-        Server {
-            config: config,
-            thread_pool: ThreadPool::new(4),
-        }
+    pub fn new() -> Result<Server, Box<dyn std::error::Error>> {
+        let config = Arc::new(Config::default());
+        Ok(Server {
+            config: config.clone(),
+            request_processor: Arc::new(RequestProcessor::new(config.clone())),
+        })
     }
-    pub fn run(self) {
-        let host = "127.0.0.1";
-        let listener =
-            TcpListener::bind(host.to_string() + ":" + self.config.port.to_string().as_str())
-                .unwrap();
-        let config = Arc::new(self.config);
 
-        for stream in listener.incoming() {
-            let stream = stream.unwrap();
-            let config = config.clone();
-            self.thread_pool.execute(|| {
-                Self::handle_connection(stream, config);
-            });
+    pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
+        let host = "127.0.0.1";
+        let listener = TcpListener::bind(host.to_string() + ":" + self.config.port.to_string().as_str())
+            .await
+            .expect("unable to bind to port 8080");
+        loop {
+            let (socket, _) = listener.accept().await?;
+            let request_processor = self.request_processor.clone();
+            tokio::spawn(async move { Self::handle_connection(socket, request_processor).await });
         }
     }
 
     pub fn set_config(&mut self, config: Config) {
-        self.config = config;
+        self.config = Arc::new(config);
+        self.request_processor = Arc::new(RequestProcessor::new(self.config.clone()))
     }
 
-    pub fn handle_connection(mut stream: TcpStream, config: Arc<Config>) {
-        let request_processor = RequestProcessor::new(config);
+    pub async fn handle_connection(mut stream: TcpStream, request_processor: Arc<RequestProcessor>) {
+        let mut response = Response::new();
+        let request: Request;
 
-        let response = match request::Request::load(&mut stream) {
-            Ok(request) => match request_processor.process(request) {
-                Ok(request) => request,
-                Err(HttpError::ClientError(e)) => e.to_response(),
-                Err(HttpError::ServerError(e)) => e.to_response()
-            },
-            Err(HttpError::ClientError(e)) => e.to_response(),
-            Err(HttpError::ServerError(e)) => e.to_response()
-        };
-
-        stream.write(response.to_string().as_bytes()).unwrap();
+        match request::Request::load(&mut stream).await {
+            Ok(request_from_stream) => request = request_from_stream,
+            Err(http_error) => {
+                response = http_error.to_response();
+                response.send_to(stream).await;
+                return;
+            }
+        }
+        match request_processor.process(request) {
+            Ok(response_from_processor) => response = response_from_processor,
+            Err(http_error) => {
+                response = http_error.to_response();
+                response.send_to(stream).await;
+                return;
+            }
+        }
+        response.send_to(stream).await;
     }
+
+    
 }

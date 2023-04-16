@@ -7,3 +7,7 @@ edition = "2021"
 
 [dependencies]
 base64 = "0.21.0"
+tokio = { version = "1", features = ["full"] }
+curl = "0.4.44"
+hyper = { version = "0.14.26", features = ["full"] }
+url-builder = "0.1.1"

@@ -8,6 +8,9 @@ pub struct Headers {
     headers: HashMap<HeaderKey, HeaderValue>,
 }
 
+pub const WWW_AUTHENTICATE: &str = "WWW-Authenticate";
+pub const CONTENT_LENGTH: &str = "Content-Length";
+pub const SERVER: &str = "Server";
 
 
 impl Headers {
@@ -19,7 +22,7 @@ impl Headers {
     pub fn parse_and_add_header_from(&mut self, header_field: String) -> Result<(), ParseError> {
         match header_field.split_once(':') {
             Some((header_key, header_value)) => {
-                self.add_header(header_key.to_string(), header_value.to_string());
+                self.add_header(header_key, header_value);
                 Ok(())
             }
             None => Err(ParseError)
@@ -30,7 +33,7 @@ impl Headers {
         self.headers.get(header)
     }
 
-    pub fn add_header(&mut self, header_key: String, header_value: String) {
+    pub fn add_header(&mut self, header_key: &str, header_value: &str) {
         self.headers.insert(header_key.trim().to_string(), header_value.trim().to_string());
     }
 }

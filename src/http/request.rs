@@ -1,14 +1,13 @@
 use super::{
-    errors::{ClientError, HttpError, ServerError},
+    errors::{HttpError, ServerError},
     headers::Headers,
     Body, HttpVerion, ParseError, CRLF,
 };
 
 use std::{
     collections::HashMap,
-    io::{prelude::*, BufReader},
-    net::TcpStream,
 };
+use tokio::{net::TcpStream, io::{BufReader, AsyncBufReadExt}};
 
 type _URI = String;
 type Params = HashMap<String, String>;
@@ -25,6 +24,7 @@ pub struct RequestLine {
     pub http_version: HttpVerion,
 }
 
+#[derive(PartialEq)]
 pub enum Method {
     GET,
     POST,
@@ -46,17 +46,11 @@ impl RequestLine {
     pub fn parse(request_line: String) -> Result<RequestLine, ParseError> {
         let mut request_line_items = request_line.split_ascii_whitespace().map(|s| s.to_string());
         let method = match request_line_items.next() {
-            Some(method_string) => match Method::parse(&method_string) {
-                Ok(method) => method,
-                Err(e) => return Err(e),
-            },
+            Some(method_string) => Method::parse(&method_string)?,
             None => return Err(ParseError),
         };
         let request_target = match request_line_items.next() {
-            Some(request_target_string) => match RequestTarget::parse(request_target_string) {
-                Ok(request_target) => request_target,
-                Err(e) => return Err(e),
-            },
+            Some(request_target_string) => RequestTarget::parse(request_target_string)?,
             None => return Err(ParseError),
         };
         let http_version = match request_line_items.next() {
@@ -105,7 +99,7 @@ impl RequestTarget {
     }
 
     pub fn get_param(&self, param: &str) -> Option<&String> {
-        self.query.as_ref().and_then(|query| query.get_param(param))
+        self.query.as_ref()?.get_param(param)
     }
 }
 
@@ -141,29 +135,26 @@ impl Query {
 }
 
 impl Request {
-    pub fn load(request_stream: &mut TcpStream) -> Result<Request, HttpError> {
+    pub async fn load(request_stream: &mut TcpStream) -> Result<Request, HttpError> {
         let mut buf_reader = BufReader::new(request_stream);
         let mut request_line = String::new();
-        match buf_reader.read_line(&mut request_line) {
+        match buf_reader.read_line(&mut request_line).await {
             Ok(_) => (),
-            Err(e) => return Err(HttpError::ServerError(ServerError::InternalServerError)),
+            Err(_e) => return Err(HttpError::ServerError(ServerError::InternalServerError)),
         }
-        let request_line = match RequestLine::parse(request_line) {
-            Ok(request_line) => request_line,
-            Err(e) => return Err(HttpError::ClientError(ClientError::BadRequest)),
-        };
+        let request_line = RequestLine::parse(request_line)?;
 
         let mut headers = Headers::new();
         loop {
             let mut line = String::new();
-            match buf_reader.read_line(&mut line) {
+            match buf_reader.read_line(&mut line).await {
                 Ok(_) => (),
-                Err(e) => return Err(HttpError::ServerError(ServerError::InternalServerError)),
+                Err(_e) => return Err(HttpError::ServerError(ServerError::InternalServerError)),
             };
             if line == CRLF {
                 break;
             }
-            headers.parse_and_add_header_from(line);
+            headers.parse_and_add_header_from(line)?;
         }
 
         Ok(Request {
